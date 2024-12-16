@@ -1,0 +1,106 @@
+# Guffal Bot for Discord
+# Shadows of Guffal - A Multiplayer Text Adventure
+
+import discord
+from discord.ext import commands
+import random
+import sqlite3
+
+# Bot setup
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!guffal ", intents=intents)
+
+# Database setup
+db = sqlite3.connect('guffal.db')
+cursor = db.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS players (
+    user_id INTEGER PRIMARY KEY,
+    coins INTEGER DEFAULT 0,
+    inventory TEXT DEFAULT '',
+    location TEXT DEFAULT 'Entrance Hall'
+)''')
+db.commit()
+
+# Helper functions
+def get_player(user_id):
+    cursor.execute("SELECT * FROM players WHERE user_id = ?", (user_id,))
+    return cursor.fetchone()
+
+def create_player(user_id):
+    cursor.execute("INSERT INTO players (user_id) VALUES (?)", (user_id,))
+    db.commit()
+
+# Commands
+@bot.event
+async def on_ready():
+    print(f'{bot.user.name} has connected to Discord!')
+
+@bot.command()
+async def start(ctx):
+    user_id = ctx.author.id
+    if not get_player(user_id):
+        create_player(user_id)
+        await ctx.send(f"Welcome, {ctx.author.mention}, to the Shadows of Guffal! Your journey begins in the Entrance Hall.")
+    else:
+        await ctx.send(f"{ctx.author.mention}, you are already in the game! Use `!guffal explore` to continue your adventure.")
+
+@bot.command()
+async def explore(ctx):
+    user_id = ctx.author.id
+    player = get_player(user_id)
+    if not player:
+        await ctx.send(f"{ctx.author.mention}, you must use `!guffal start` to join the game first!")
+        return
+
+    events = [
+        "You find a chest with 10 coins!",
+        "A ghost attacks you, but you fend it off with your courage!",
+        "You stumble upon a hidden room but find nothing of value.",
+        "A trap triggers, and you lose 5 coins!"
+    ]
+    event = random.choice(events)
+    if "10 coins" in event:
+        cursor.execute("UPDATE players SET coins = coins + 10 WHERE user_id = ?", (user_id,))
+    elif "lose 5 coins" in event:
+        cursor.execute("UPDATE players SET coins = coins - 5 WHERE user_id = ?", (user_id,))
+    db.commit()
+
+    await ctx.send(f"{ctx.author.mention}, {event}")
+
+@bot.command()
+async def inventory(ctx):
+    user_id = ctx.author.id
+    player = get_player(user_id)
+    if not player:
+        await ctx.send(f"{ctx.author.mention}, you must use `!guffal start` to join the game first!")
+        return
+
+    coins, inventory = player[1], player[2]
+    await ctx.send(f"{ctx.author.mention}, you have {coins} coins and the following items: {inventory if inventory else 'None'}.")
+
+@bot.command()
+async def riddle(ctx):
+    riddles = {
+        "I speak without a mouth and hear without ears. What am I?": "echo",
+        "What has keys but can't open locks?": "piano",
+        "The more you take, the more you leave behind. What am I?": "footsteps"
+    }
+    question, answer = random.choice(list(riddles.items()))
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    await ctx.send(f"Riddle: {question}")
+    try:
+        guess = await bot.wait_for('message', timeout=30.0, check=check)
+        if guess.content.lower() == answer:
+            await ctx.send(f"Correct, {ctx.author.mention}! You’ve been rewarded with 20 coins!")
+            cursor.execute("UPDATE players SET coins = coins + 20 WHERE user_id = ?", (ctx.author.id,))
+            db.commit()
+        else:
+            await ctx.send(f"Wrong answer, {ctx.author.mention}. The correct answer was: {answer}.")
+    except:
+        await ctx.send(f"Time’s up, {ctx.author.mention}! The correct answer was: {answer}.")
+
+# Run the bot
+bot.run('YOUR_DISCORD_BOT_TOKEN')
